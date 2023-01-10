@@ -1,24 +1,20 @@
 import argparse
 from dataclasses import dataclass
 from typing import Iterable, Any, Dict
+import requests
 
 import yaml
 import pandas as pd
 import numpy as np
 from pmlb import fetch_data
+from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
 
-CAT_DATASETS = [
-    'adult',
-    'agaricus_lepiota',
-    'analcatdata_asbestos'
-]
-
 @dataclass
 class Split:
-    X: np.ndarray
-    y: np.ndarray
+    X: pd.DataFrame
+    y: pd.DataFrame
 
 @dataclass
 class Dataset:
@@ -34,7 +30,7 @@ class Dataset:
         self,
         splits: Iterable[float],
         seed: int = 1,
-    ) -> tuple[Split, ...]:
+    ):
         """Create splits of the data
 
         Parameters
@@ -56,7 +52,8 @@ class Dataset:
         sample_sizes = tuple(int(s * len(self.features)) for s in splits)
 
         collected_splits = []
-
+        
+        feature_names = self.features.columns.to_list()
         next_xs = self.features.to_numpy()
         next_ys = self.target.to_numpy()
 
@@ -64,8 +61,13 @@ class Dataset:
             xs, next_xs, ys, next_ys = train_test_split(
                 next_xs, next_ys, train_size=size, random_state=seed
             )
-            collected_splits.append(Split(X=xs, y=ys))
-        collected_splits.append(Split(X=next_xs, y=next_ys))
+            temp_features_df = pd.DataFrame(xs, columns=feature_names)
+            temp_target_df = pd.DataFrame(ys, columns=["target"])
+            collected_splits.append(Split(X=temp_features_df, y=temp_target_df))
+
+        temp_features_df = pd.DataFrame(next_xs, columns=feature_names)
+        temp_target_df = pd.DataFrame(next_ys, columns=["target"])
+        collected_splits.append(Split(X=temp_features_df, y=temp_target_df))
 
         return tuple(collected_splits)
 
@@ -74,9 +76,18 @@ class Dataset:
         Doing some preprocessing to the dataset to make it easier to model
         using different ML algorithms
         """
+        # Drop duplicate entries from the dataset
+        init_count = np.sum(self.dataset.value_counts().values)
+        self.dataset = self.dataset.drop_duplicates()
+        final_count = np.sum(self.dataset.value_counts().values)
+        print(f"PRE_PROCESSING: No. of duplicate entries removed: {init_count - final_count}")
+        self.features = self.dataset.drop('target', axis=1)
+        self.target = self.dataset['target']
+
         features = self.features.columns.to_list()
         del_names = []
         ctg_features = []
+        cont_features = []
         for name in features:
             # Delete columns that have the same value for all instances
             unq_features, _ = np.unique(self.features[name], return_counts=True)
@@ -87,8 +98,12 @@ class Dataset:
             # since the order might matter in some cases
             if name not in del_names and self.metadata.get(name)["type"] in ["categorical", "object"]:
                 ctg_features.append(name)
+            
+            # Continuous values are expected to be of type float as well
+            if name not in del_names and (self.metadata.get(name)["type"] == "continuous" and self.features[name].dtype == "float64"):
+                cont_features.append(name)
 
-        print(f"PRE_PROCESSING: No. of deleted features with the same value for all entries - {len(del_names)}")
+        # print(f"PRE_PROCESSING: No. of deleted features with the same value for all entries - {len(del_names)}")
         self.features = self.features.drop(del_names, axis=1)
 
         # One-hot encode categorical features.
@@ -99,26 +114,26 @@ class Dataset:
             ohe_features = pd.get_dummies(feature, feature_name)
             self.features = pd.concat([self.features, ohe_features], axis=1)
 
-        # Move unique instances to the test set
+        # Normalizing all continuous features
+        print(f"PRE_PROCESSING: No. of features normalised - {len(cont_features)}")
+        if len(cont_features) != 0:
+            scalar = StandardScaler()
+            self.features[cont_features] = scalar.fit_transform(self.features[cont_features])
 
         # Remove features that have more than 60% distinct values, if categorical
 
-    def get_feature_imp(self):
+    @staticmethod
+    def get_feature_imp(data: Split):
         """
-        Find feature importance using RandomForest classifier
+            Find feature importance using RandomForest classifier
         """
-        train, test = self.split([0.2, 0.8])
-        rf = RandomForestClassifier(max_depth=10, random_state=42, n_estimators = 300).fit(train.X, train.y)
-        feature_importances = pd.DataFrame(
-                                    rf.feature_importances_,
-                                    index=self.features.columns.to_list(),
-                                    columns=['importance']
-                                ).sort_values('importance', ascending=False)
-        print(feature_importances)
+        rf = RandomForestClassifier(max_depth=10, random_state=42, n_estimators = 300).fit(data.X.values, data.y.values.ravel())
+        feature_importances = pd.DataFrame({'importance': rf.feature_importances_}, index=data.X.columns.to_list())
+        return feature_importances
 
     def info(self) -> None:
         """
-        Prints some basic information about the target values
+            Prints some basic information about the target values
         """
         print(f'Dataset: "{self.name}"')
         print("Total no. of Instances: ", len(self.target.values))
@@ -134,9 +149,27 @@ class Dataset:
         pd_desc = self.dataset.describe().transpose()
         col_type = []
         col_desc = []
-        for idx in pd_desc.index:
-            col_type.append(self.metadata.get(idx)["type"])
-            col_desc.append(self.metadata.get(idx)["desc"])
+        col_types = {
+            "continuous": "float",
+            "categorical": "category",
+            "ordinal": "category",
+            "binary": "boolean"
+        }
+
+        # Setting the correct types for the datasets
+        for cols in self.dataset.columns:
+            _type = self.metadata.get(cols)["type"]
+            # print(cols, "-----", _type)
+            # self.dataset[cols] = self.dataset[cols].astype(col_types.get(_type))
+            col_type.append(_type)
+            col_desc.append(self.metadata.get(cols)["desc"])
+
+        # Resetting the features and target values
+        # self.features = self.dataset.drop('target', axis=1)
+        # self.target = self.dataset['target']
+
+        # for _idx, _type in enumerate(col_type):
+        #     self.features.columns[_idx] .astype("float" if _type == "continuous" else _type)
         pd_desc["type"] = col_type
         pd_desc["description"] = col_desc
         print(pd_desc, '\n')
@@ -172,10 +205,11 @@ class Dataset:
                 "type": metadata_yaml["target"]["type"],
                 "desc": metadata_yaml["target"]["description"]
             }
+
             for col in metadata_yaml["features"]:
                 metadata[col["name"]] = {
                     "type": col["type"],
-                    "desc": col["description"]
+                    "desc": col["description"] if "description" in col else "None"
                 }
         except:
             raise ValueError("Failed to get metadata. The resulting dataset might be erroneous.")
@@ -210,14 +244,30 @@ if __name__ == "__main__":
         # dataset_list = regression_dataset_names[:3]
 
     # Fetch the datasets and get some basic information about them
-    dataset_list = CAT_DATASETS
+    CAT_DATASETS = [
+        'adult',
+        'agaricus_lepiota',
+        'analcatdata_asbestos',
+        'biomed',
+        'breast_cancer',
+        'chess',
+        'credit_g',
+        'glass2',
+        'heart_h',
+        'kddcup',
+        'connect_4'
+    ]
+    dataset_list = CAT_DATASETS[6:]
     
-    import requests
     for dataset in dataset_list:
         curr_dataset = Dataset.from_pmlb(dataset, task)
-        curr_dataset.info()
+        # print(curr_dataset.features.dtypes)
+        # feat_type = [
+        #     x.name for x in curr_dataset.features.dtypes
+        # ]
+        # print(feat_type)
+        # curr_dataset.info()
         curr_dataset.pre_processing()
-        curr_dataset.get_feature_imp()
-        # # curr_dataset.pre_processing()
+        # curr_dataset.get_feature_imp()
         # print(curr_dataset.dataset.attrs())
         print("===================================\n")
