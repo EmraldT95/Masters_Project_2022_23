@@ -5,27 +5,68 @@ import ConfigSpace as CS
 from ConfigSpace.configuration_space import ConfigurationSpace
 from ConfigSpace.hyperparameters import CategoricalHyperparameter
 
-from src.model_config_space import KNN, MLP, NB, SVM, XGB
+from src.model_config_space import KNN_Cls, KNN_Reg, MLP_Cls, MLP_Reg, NB, SVM_Cls, SVM_Reg, XGB_Cls, XGB_Reg, Bayesian_Ridge_Reg
 
 CAT_DATASETS = [
     'adult',
-    # 'agaricus_lepiota',
+    'agaricus_lepiota',
+    'analcatdata_authorship',
     'cleveland',
-    # 'biomed',
-    # 'breast_cancer',
-    # 'chess',
-    # 'credit_g',
-    # 'glass2',
-    'fars',
-    'connect_4'
+    'car_evaluation',
+    'biomed',
+    'breast_cancer',
+    'chess',
+    'credit_g',
+    'glass2',
+    'coil2000',
+    'dermatology',
+    'GAMETES_Epistasis_2_Way_20atts_0.1H_EDM_1_1',
+    'german',
+    'iris',
+    'magic',
+    'letter',
+    'connect_4',
+    'wine_quality_white',
+    'yeast'
+]
+
+REG_DATASETS = [
+    '197_cpu_act',
+    '201_pol',
+    '215_2dplanes',
+    '218_house_8L',
+    '225_puma8NH',
+    '230_machine_cpu',
+    '294_satellite_image',
+    '503_wind',
+    '529_pollen',
+    '562_cpu_small',
+    '574_house_16H',
+    '589_fri_c2_1000_25',
+    '620_fri_c1_1000_25',
+    '649_fri_c0_500_5',
+    '654_fri_c0_500_10',
+    '690_visualizing_galaxy',
+    '1027_ESL',
+    '1193_BNG_lowbwt',
+    '1199_BNG_echoMonths',
+    'banana',
 ]
 
 _CLASSIFIERS = {
-    "KNN": KNN,
-    "MLP": MLP,
+    "KNN": KNN_Cls,
+    "MLP": MLP_Cls,
     "NB": NB,
-    "SVM": SVM,
-    "XGB": XGB
+    "SVM": SVM_Cls,
+    "XGB": XGB_Cls
+}
+
+_REGRESSORS = {
+    "KNN": KNN_Reg,
+    "MLP": MLP_Reg,
+    "BRR": Bayesian_Ridge_Reg,
+    "SVM": SVM_Reg,
+    "XGB": XGB_Reg,
 }
 
 class Estimator(BaseEstimator):
@@ -63,34 +104,25 @@ class Estimator(BaseEstimator):
         return super().get_params(deep)
 
 class Classifiers(Estimator):
-    """This class initializes each of the individual base classifiers. This helps deal
-    with multi-label problem more easily as it transforms the dataset provided locally,
-    and then deal with it as multiple single-label problems. Essentially, it does the
-    pre-processing of the data to fit its needs.
+    """
+        This class initializes each of the individual base classifiers.
 
-    In case of MLP, we don't really wrap around one of the problem transformer bases as
-    it is known to work well with raw data and learn different levels of representation
-    of the data given.
-
-    Args:
-        name: The type of base classifier to use
-        hyperparameters: The hyperparameters to be used for the classifier
+        Args:
+            name: The type of base classifier to use
+            hyperparameters: The hyperparameters to be used for the classifier
     """
 
     def __init__(self, name, hyperparameters):
-        self._name = name
-        self._hyperparameters = hyperparameters
-        assert self._name in _CLASSIFIERS.keys()
-
-        # if hyperparameters are passed, else use default hyperparameters
-        if self._hyperparameters:
-            self._base_classifier = _CLASSIFIERS[self._name](**self._hyperparameters)
-        else:
-            self._base_classifier = _CLASSIFIERS[self._name]()
-        super().__init__(self._name, self._base_classifier)
+        assert name in _CLASSIFIERS.keys(), "Classifier not in configspace"
+        self._base_classifier = _CLASSIFIERS[name](**hyperparameters)
+        super().__init__(name, self._base_classifier)
     
     @staticmethod
     def space() -> CS:
+        """
+            Returns the config space containing all the classifiers needed along
+            with their parameters as children
+        """
         cs = ConfigurationSpace()
         # Adding the list of classifiers as a categorical hyperparameters
         classifier_types = [key for key in list(_CLASSIFIERS.keys())]
@@ -109,8 +141,39 @@ class Classifiers(Estimator):
 
     @property
     def estimator(self):
-        return self._estimator
+        return self._base_classifier
+
+class Regressors(Estimator):
+    """This class initializes each of the individual base regressors. 
+
+    Args:
+        name: The type of base classifier to use
+        hyperparameters: The hyperparameters to be used for the classifier
+    """
+
+    def __init__(self, name, hyperparameters):
+        assert name in _REGRESSORS.keys(), "Classifier not in configspace"
+        self._base_classifier = _REGRESSORS[name](**hyperparameters)
+        super().__init__(name, self._base_classifier)
+    
+    @staticmethod
+    def space() -> CS:
+        cs = ConfigurationSpace()
+        # Adding the list of classifiers as a categorical hyperparameters
+        classifier_types = [key for key in list(_REGRESSORS.keys())]
+        classifier = CategoricalHyperparameter("base_estimator", classifier_types)
+        cs.add_hyperparameter(classifier)
+
+        # Adding the config space of all the respective classifiers
+        for key in classifier_types:
+            cs.add_configuration_space(
+                prefix="",
+                delimiter="",
+                configuration_space=_REGRESSORS.get(key).space(),
+                parent_hyperparameter={"parent": cs["base_estimator"], "value": key},
+            )
+        return cs
 
     @property
-    def base_classifier(self):
+    def estimator(self):
         return self._base_classifier
