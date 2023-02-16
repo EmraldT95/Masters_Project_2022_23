@@ -24,8 +24,8 @@ def dehb_search(cs: ConfigurationSpace, scenario:dict, data: Split, task: str, s
         min_budget=min_budget,
         max_budget=max_budget,
         eta=3,
-        strategy="randtobest1_bin",
-        output_path=f"{scenario['output_dir']}/dehb_run"
+        output_path=f"{scenario['output_dir']}/dehb_run",
+        n_workers=-1
     )
     _, _, _ = dehb.run(total_cost=scenario["wallclock_limit"], verbose=True, save_intermediate=False)
 
