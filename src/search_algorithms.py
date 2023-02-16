@@ -24,8 +24,8 @@ def dehb_search(cs: ConfigurationSpace, scenario:dict, data: Split, task: str, s
         min_budget=min_budget,
         max_budget=max_budget,
         eta=3,
-        output_path=f"{scenario['output_dir']}/dehb_run",
-        n_workers=1                # set to >1 to utilize parallel workers
+        strategy="randtobest1_bin",
+        output_path=f"{scenario['output_dir']}/dehb_run"
     )
     _, _, _ = dehb.run(total_cost=scenario["wallclock_limit"], verbose=True, save_intermediate=False)
 
@@ -65,6 +65,7 @@ def smac_search(cs: ConfigurationSpace, search_type: str, scenario:dict, data: S
 
     smac_scenario = Scenario(scenario) # SMAC3 Scenario object
     tae_runner = partial(target_func, search_type=search_type, task_type=task, train=data, seed=seed)
+    wallclock_lim = scenario['wallclock_limit']
 
     if search_type == "Random":
         # Random search in SMAC
@@ -78,10 +79,17 @@ def smac_search(cs: ConfigurationSpace, search_type: str, scenario:dict, data: S
     else:
         # The Hyperband config
         intensifier_kwargs = {
-            "initial_budget": 0.2 * scenario['wallclock_limit'],
-            "max_budget": scenario['wallclock_limit'],
+            "initial_budget": 0.2 * wallclock_lim,
+            "max_budget": wallclock_lim,
             "eta": 3
         }
+
+        if wallclock_lim >= 3600:
+            n_config_x_params = 10
+        elif wallclock_lim >= 1800:
+            n_config_x_params = 6
+        else:
+            n_config_x_params = 4
 
         # This is the closest implementation of BOHB in SMAC3 (check the docs)
         smac = SMAC4MF(
@@ -90,7 +98,7 @@ def smac_search(cs: ConfigurationSpace, search_type: str, scenario:dict, data: S
             run_id=seed,
             tae_runner=tae_runner,
             intensifier_kwargs=intensifier_kwargs,
-            initial_design_kwargs={'n_configs_x_params': 6, 'max_config_fracs': .2})
+            initial_design_kwargs={'n_configs_x_params': n_config_x_params, 'max_config_fracs': .2})
 
     _, def_value, _, def_addtn_vals = smac.get_tae_runner().run(config=cs.get_default_configuration(), seed=seed)
 
