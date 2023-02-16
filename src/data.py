@@ -103,7 +103,7 @@ class Dataset:
             if name not in del_names and (self.metadata.get(name)["type"] == "continuous" and self.features[name].dtype == "float64"):
                 cont_features.append(name)
 
-        # print(f"PRE_PROCESSING: No. of deleted features with the same value for all entries - {len(del_names)}")
+        print(f"PRE_PROCESSING: No. of deleted features with the same value for all entries - {len(del_names)}")
         self.features = self.features.drop(del_names, axis=1)
 
         # One-hot encode categorical features.
