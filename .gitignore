@@ -1,5 +1,6 @@
 .vscode
-.wsl_venv
+*venv*
 datasets
 
 output*
+**/__pycache__
