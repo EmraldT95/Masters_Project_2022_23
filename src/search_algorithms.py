@@ -16,7 +16,6 @@ def dehb_search(cs: ConfigurationSpace, scenario:dict, data: Split, task: str, s
     """
     # 20% wallclock-limit as minimum budget
     min_budget, max_budget = (0.2 * scenario["wallclock_limit"], scenario["wallclock_limit"])
-    dimensions = len(cs.get_hyperparameters())
     # os.environ["MALLOC_TRIM_THRESHOLD_ "] = "10"
     dehb = DEHB(
         f=partial(target_func, search_type="DEHB", task_type=task, train=data, seed=seed),
@@ -69,12 +68,14 @@ def smac_search(cs: ConfigurationSpace, search_type: str, scenario:dict, data: S
 
     if search_type == "Random":
         # Random search in SMAC
+        scenario["initial_incumbent"] = "RANDOM"
+        smac_scenario = Scenario(scenario) # SMAC3 Scenario object
+
         smac = ROAR(
             scenario=smac_scenario,
             rng=seed,
             run_id=seed,
-            tae_runner=tae_runner,
-            initial_design_kwargs={"configs": [cs.get_default_configuration()]}
+            tae_runner=tae_runner
         )
     else:
         # The Hyperband config

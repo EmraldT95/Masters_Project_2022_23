@@ -12,6 +12,7 @@ def plot_pareto_front(runs: list, run_path: str, dataset_name: str):
 
     search_type = "DEHB"
     plot_color = COLORS[2]
+    overall_time = 0
     # Go through each run directory
     for run_dir in runs:
         run_files_path = os.path.join(run_path, run_dir)
@@ -19,7 +20,6 @@ def plot_pareto_front(runs: list, run_path: str, dataset_name: str):
         BOHB_check = [inc_file for inc_file in run_files if "BOHB" in inc_file]
         Random_check = [inc_file for inc_file in run_files if "Random" in inc_file]
         run_start_time = 0
-        overall_time = 0
 
         # Find what type of search it was based on the incumbent file
         if len(BOHB_check) > 0:
@@ -168,7 +168,7 @@ if __name__ == "__main__":
     datasets = [dataset for dataset in datasets if dataset != "test_results.json"]
 
     if args.plot == "Pareto" or args.plot == "All":
-        for dataset in datasets[4:9]:
+        for dataset in datasets:
             run_path = os.path.join(arg_path, dataset)
             runs = os.listdir(run_path)
             plot_pareto_front(runs, run_path, dataset)
