@@ -80,7 +80,7 @@ def get_estimator_instance(config: dict, task: str, data: np.ndarray, seed: int)
     # return an instance of the estimator
     return _ESTIMATORS[task](base_estimator, config)
 
-def trainer(cfg: Configuration, search_type: str, task_type: str, train: pd.DataFrame, seed: int, **kwargs):
+def trainer(cfg: Configuration, budget: int, seed:int, search_type: str, task_type: str, train: pd.DataFrame):
     """
         Creates an instance of the Estimator and fits the given data on it.
 
@@ -88,16 +88,16 @@ def trainer(cfg: Configuration, search_type: str, task_type: str, train: pd.Data
         ----------
         cfg: Configuration
             The configuration used by the tae_runner to optimize the target function.
+        budget: int
+            The current budget used for optimization - BOHB and DEHB
+        seed: int
+            The RandomState seed to get deterministic results.
         search_type: str
             The search strategy - Random, BOHB, DEHB, All.
         task_type: str
             Either regression or classification.
         train: DataFrame
             The training dataset to use to optimize the target function.
-        seed: int
-            The RandomState seed to get deterministic results.
-        kwargs: dict
-            Contains other arguments such as the budget of the current run, set by SMAC itself.
 
         Returns:
         -------
@@ -108,6 +108,14 @@ def trainer(cfg: Configuration, search_type: str, task_type: str, train: pd.Data
     config_dict = cfg.get_dictionary()
     train_X = train.X.values
     train_y = train.y.values.ravel()
+
+    # Getting instances based on budget for DEHB and BOHB
+    if search_type in ["DEHB", "BOHB"] :
+        train_X = train_X[:int(budget)]
+        train_y = train_y[:int(budget)]
+    
+    # Using the budgetted instances only
+    print("budget = ", budget, train_X.shape)
     # Passing a copy of the config dict since we are overriding some values due to name clash
     estimator = get_estimator_instance(copy.deepcopy(config_dict), task_type, train_X, seed)
     estimator_type = config_dict["base_estimator"]
@@ -116,33 +124,33 @@ def trainer(cfg: Configuration, search_type: str, task_type: str, train: pd.Data
 
     start = time.time()
 
+    # Fits to the training dataset and gets the validation score
+    def fit_estimator(estimator, train_X_t, train_y_t, train_X_v, train_y_v):
+        estimator.fit(train_X_t, train_y_t)
+        if task == "Classification":
+            est_val_score = f1_score(train_y_v, estimator.predict(train_X_v), average='micro')
+        else:
+            est_val_score = r2_score(train_y_v, estimator.predict(train_X_v))
+        return est_val_score
+
     # If the size of the dataset is greater than 100k records, or
     # if the estimator is of type MLP, use hold-one-out for validation. 
     # Else use KFold cross-validation.
     try:
         if train_X.shape[0] > 100000 or estimator_type == "MLP":
-            train_X_t, train_X_v, train_y_t, train_y_v = train_test_split(train_X, train_y, train_size=0.8, random_state=seed)
-            estimator.fit(train_X_t, train_y_t)
-            if task == "Classification":
-                val_score = f1_score(train_y_v, estimator.predict(train_X_v), average='micro')
-            else:
-                val_score = r2_score(train_y_v, estimator.predict(train_X_v))
+            train_X_tr, train_X_vn, train_y_tr, train_y_vn = train_test_split(train_X, train_y, train_size=0.8, random_state=seed)
+            val_score = fit_estimator(estimator, train_X_tr, train_y_tr, train_X_vn, train_y_vn)
         else:
             if task_type == "Classification":
                 kf = StratifiedKFold(n_splits=5)
             else:
                 kf = KFold(n_splits=5)
-            scores = []
+            val_scores = []
             for train_indices, val_indices in kf.split(train_X, train_y):
-                estimator.fit(train_X[train_indices], train_y[train_indices])
-                if task == "Classification":
-                    score = f1_score(train_y[val_indices], estimator.predict(train_X[val_indices]), average='micro')
-                else:
-                    score = r2_score(train_y[val_indices], estimator.predict(train_X[val_indices]))
+                score = fit_estimator(estimator, train_X[train_indices], train_y[train_indices], train_X[val_indices], train_y[val_indices])
+                val_scores.append(score)
 
-                scores.append(score)
-
-            val_score = np.mean(scores)
+            val_score = np.mean(val_scores)
     except Exception as e:
         print("------ Estimator training failed ------\n", e)
         val_score = 0
@@ -153,7 +161,6 @@ def trainer(cfg: Configuration, search_type: str, task_type: str, train: pd.Data
     del estimator
 
     if search_type == "DEHB":
-        budget = kwargs['budget']
         result = {
             "fitness": 1-val_score, # DE/DEHB minimizes
             "cost": cost,
@@ -164,7 +171,7 @@ def trainer(cfg: Configuration, search_type: str, task_type: str, train: pd.Data
             }
         }
     else:
-        result = (1 - val_score, {"val_f1_score": val_score, "search_type": search_type})
+        result = (1 - val_score, {"val_f1_score": val_score, "search_type": search_type, "budget": budget})
 
     return result
 
@@ -333,7 +340,7 @@ if __name__ == "__main__":
             # Only use the above features for training and testing
             train.X = train.X[feature_importances.index]
             test.X = test.X[feature_importances.index]
-        print("Training: features shape = ", train.X.to_numpy().shape, ", target values shape = ", test.X.to_numpy().shape)
+        print("Training dataset shape: ", train.X.to_numpy().shape, ", Test dataset shape: ", test.X.to_numpy().shape)
 
         # Setting the output directory for the runs and incumbent configs
         scenario["output_dir"] = os.path.join(current_dir, f"{args.path}/{dataset_name}")
@@ -346,6 +353,9 @@ if __name__ == "__main__":
             # Creating folder if it doesnt already exist
             if not os.path.exists(f"{scenario['output_dir']}/incumbents"):
                 os.makedirs( f"{scenario['output_dir']}/incumbents")
+            
+            # Using no. of instances as budget
+            max_budget = train.X.to_numpy().shape[0]
 
             if args.type == "Random" or args.type == "All":
                 print("="*40, "\nRandom Search\n", "="*40)
@@ -353,11 +363,11 @@ if __name__ == "__main__":
                 call_gc()
             if args.type == "BOHB" or args.type == "All":
                 print("="*40, "\nBOHB Search\n", "="*40)
-                BOHB_best_config = smac_search(cs, "BOHB", scenario, train, task, seed, current_dir, trainer)
+                BOHB_best_config = smac_search(cs, "BOHB", scenario, train, task, seed, current_dir, trainer, max_budget)
                 call_gc()
             if args.type == "DEHB" or args.type == "All":
                 print("="*40, "\nDEHB Search\n", "="*40)
-                DEHB_best_config = dehb_search(cs, scenario, train, task, seed, current_dir, trainer)
+                DEHB_best_config = dehb_search(cs, scenario, train, task, seed, current_dir, trainer, max_budget)
                 call_gc()
 
     # Print test results for all datasets

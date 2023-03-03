@@ -10,12 +10,34 @@ from ConfigSpace import ConfigurationSpace
 
 from src.data import Split
 
-def dehb_search(cs: ConfigurationSpace, scenario:dict, data: Split, task: str, seed: int, root_path: str, target_func: Callable):
+def dehb_search(cs: ConfigurationSpace, scenario:dict, data: Split, task: str, seed: int, root_path: str, target_func: Callable, max_budget=0):
     """
         Runs DEHB for finding the best configuration that optimizes the 'trainer' function.
+
+        Parameters
+        ----------
+        cs: ConfigurationSpace
+            The Hyperparameter configuration space to search in
+        search_type: str
+            Determines which SMAC3 facade to use and the search strategy
+        data: Split
+            The training data that is to be used during training
+        task: str
+            The type of task, i.e, Classification or Regression
+        seed: int
+        root_path: str
+            The path where the run directory is
+        target_func: Callable
+            The objective function we are trying to optimize
+        max_budget: int
+            The budget to be used for DEHB (no. of instances)
+
+        Returns
+        -------
+        dcit: The incumbent hyperparameter configuration
     """
     # 20% wallclock-limit as minimum budget
-    min_budget, max_budget = (0.2 * scenario["wallclock_limit"], scenario["wallclock_limit"])
+    min_budget, max_budget = (int(0.2 * max_budget), int(max_budget))
     # os.environ["MALLOC_TRIM_THRESHOLD_ "] = "10"
     dehb = DEHB(
         f=partial(target_func, search_type="DEHB", task_type=task, train=data, seed=seed),
@@ -39,7 +61,7 @@ def dehb_search(cs: ConfigurationSpace, scenario:dict, data: Split, task: str, s
     with open(os.path.join(root_path, f"{scenario['output_dir']}/dehb_run/DEHB_opt_cfg.json"), 'w') as f:
         json.dump(opt_config, f)
 
-def smac_search(cs: ConfigurationSpace, search_type: str, scenario:dict, data: Split, task: str, seed: int, root_path: str, target_func: Callable):
+def smac_search(cs: ConfigurationSpace, search_type: str, scenario:dict, data: Split, task: str, seed: int, root_path: str, target_func: Callable, max_budget=0):
     """
         Runs SMAC3 for finding the best configuration that optimizes the 'trainer' function.
 
@@ -56,6 +78,12 @@ def smac_search(cs: ConfigurationSpace, search_type: str, scenario:dict, data: S
         task: str
             The type of task, i.e, Classification or Regression
         seed: int
+        root_path: str
+            The path where the run directory is
+        target_func: Callable
+            The objective function we are trying to optimize
+        max_budget: int
+            The budget to be used for BOHB (no. of instances)
 
         Returns
         -------
@@ -63,7 +91,7 @@ def smac_search(cs: ConfigurationSpace, search_type: str, scenario:dict, data: S
     """
 
     smac_scenario = Scenario(scenario) # SMAC3 Scenario object
-    tae_runner = partial(target_func, search_type=search_type, task_type=task, train=data, seed=seed)
+    tae_runner = partial(target_func, search_type=search_type, task_type=task, train=data)
     wallclock_lim = scenario['wallclock_limit']
 
     if search_type == "Random":
@@ -78,13 +106,15 @@ def smac_search(cs: ConfigurationSpace, search_type: str, scenario:dict, data: S
             tae_runner=tae_runner
         )
     else:
+        max_budget = int(max_budget)
         # The Hyperband config
         intensifier_kwargs = {
-            "initial_budget": 0.2 * wallclock_lim,
-            "max_budget": wallclock_lim,
+            "initial_budget": int(0.2 * max_budget),
+            "max_budget": max_budget,
             "eta": 3
         }
 
+        # Decides the no. of initial random configs to try
         if wallclock_lim >= 3600:
             n_config_x_params = 10
         elif wallclock_lim >= 1800:
@@ -101,7 +131,7 @@ def smac_search(cs: ConfigurationSpace, search_type: str, scenario:dict, data: S
             intensifier_kwargs=intensifier_kwargs,
             initial_design_kwargs={'n_configs_x_params': n_config_x_params, 'max_config_fracs': .2})
 
-    _, def_value, _, def_addtn_vals = smac.get_tae_runner().run(config=cs.get_default_configuration(), seed=seed)
+    _, def_value, _, def_addtn_vals = smac.get_tae_runner().run(config=cs.get_default_configuration(), budget=max_budget, seed=seed)
 
     # Start optimization
     try:  # try finally used to catch any interrupt
@@ -109,7 +139,7 @@ def smac_search(cs: ConfigurationSpace, search_type: str, scenario:dict, data: S
     finally:
         incumbent = smac.solver.incumbent
 
-    _, inc_value, _, addtn_vals = smac.get_tae_runner().run(config=incumbent, seed=seed)
+    _, inc_value, _, addtn_vals = smac.get_tae_runner().run(config=incumbent, budget=max_budget, seed=seed)
 
     # store the optimal configuration to disk
     opt_config = incumbent.get_dictionary()
