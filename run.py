@@ -113,9 +113,7 @@ def trainer(cfg: Configuration, budget: int, seed:int, search_type: str, task_ty
     if search_type in ["DEHB", "BOHB"] :
         train_X = train_X[:int(budget)]
         train_y = train_y[:int(budget)]
-    
-    # Using the budgetted instances only
-    print("budget = ", budget, train_X.shape)
+
     # Passing a copy of the config dict since we are overriding some values due to name clash
     estimator = get_estimator_instance(copy.deepcopy(config_dict), task_type, train_X, seed)
     estimator_type = config_dict["base_estimator"]
