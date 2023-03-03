@@ -11,7 +11,7 @@ import pdb
 import pandas as pd
 import numpy as np
 
-from sklearn.model_selection import KFold, train_test_split
+from sklearn.model_selection import KFold, train_test_split, StratifiedKFold
 from sklearn.metrics import f1_score, r2_score
 from ConfigSpace.configuration_space import Configuration
 
@@ -128,9 +128,12 @@ def trainer(cfg: Configuration, search_type: str, task_type: str, train: pd.Data
             else:
                 val_score = r2_score(train_y_v, estimator.predict(train_X_v))
         else:
-            kf = KFold(n_splits=5)
+            if task_type == "Classification":
+                kf = StratifiedKFold(n_splits=5)
+            else:
+                kf = KFold(n_splits=5)
             scores = []
-            for train_indices, val_indices in kf.split(train_X):
+            for train_indices, val_indices in kf.split(train_X, train_y):
                 estimator.fit(train_X[train_indices], train_y[train_indices])
                 if task == "Classification":
                     score = f1_score(train_y[val_indices], estimator.predict(train_X[val_indices]), average='micro')
@@ -300,7 +303,7 @@ if __name__ == "__main__":
         "memory_limit": 5120,
         "abort_on_first_run_crash": False,
         # "algo_runs_timelimit": 300, # Maximum amount of CPU-time used for optimization
-        "cutoff": 3, # Maximum runtime, after which the target algorithm is cancelled
+        # "cutoff": 3, # Maximum runtime, after which the target algorithm is cancelled
         "limit_resources": True
     }
 
