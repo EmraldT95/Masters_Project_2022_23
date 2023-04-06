@@ -33,7 +33,7 @@ python run.py --task reg --path ./path_to_your_output_folder --test
 
 ## Plotting:
 
-To create plots, we have to run the `plots.py` file. Currently we have two plots available - the Pareto front and the Average train/test score. To generate the pareto front plot for a sample run, execute the below code in the terminal.
+To create plots, we have to run the `plots.py` file. Currently we have two plots available - the 'Cost vs. Time' and the Average train/test score. To generate the pareto front plot for a sample run, execute the below code in the terminal.
 
 ````bash
 python plots.py --path ./path_to_your_output_folder
@@ -42,6 +42,6 @@ python plots.py --path ./path_to_your_output_folder
 The available flags for `run.py` are:
 | Flag                        | Values                                | Default      | Description                                                  |
 | --------------------------- | ------------------------------------- | ------------ | ------------------------------------------------------------ |
-| `-pt`, `--plot`             | `'Pareto', 'Avg', 'All'`              | `'All'`      | Type of plot to generate.                                    |
+| `-pt`, `--plot`             | `'CostvTime', 'Avg', 'All'`              | `'All'`      | Type of plot to generate.                                    |
 | `-p`, `--path`              | any *str*                             | `'./output'` | Output folder to get the files from.                         |
 | `--test`                    | *boolean on/off*                      |              | To include test results of a run (Used in `Avg` plot).       |
